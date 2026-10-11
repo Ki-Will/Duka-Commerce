@@ -86,6 +86,16 @@ export function ErrorMsg({ error }: { error: unknown }) {
   return <Notice kind="error">{msg}</Notice>;
 }
 
+/** Skeleton placeholder — avoids layout shift while data loads. */
+export function Skeleton({ lines = 3 }: { lines?: number }) {
+  return (
+    <div aria-hidden="true">
+      <div className="skeleton title" />
+      {Array.from({ length: lines }, (_, i) => <div key={i} className="skeleton line" />)}
+    </div>
+  );
+}
+
 export function useFlash() {
   const [error, setError] = useState<unknown>(null);
   const [ok, setOk] = useState<string | null>(null);

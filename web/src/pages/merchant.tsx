@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, rwf } from '../api';
 import { useAuth } from '../auth';
-import { Card, Field, Notice, ErrorMsg, Table, Empty, useFlash, StateBadge, PayBadge } from '../components';
+import { Card, Field, Notice, ErrorMsg, Table, Empty, Skeleton, useFlash, StateBadge, PayBadge } from '../components';
 
 /** Load the caller's store (404 → null when no store exists yet). */
 function useStore() {
@@ -36,7 +36,7 @@ export function MerchantHome() {
       setStore(r.store);
     }, 'Store created!');
 
-  if (!ready) return <p className="muted">Loading…</p>;
+  if (!ready) return <Skeleton lines={4} />;
 
   if (error && (!merchant || merchant.status !== 'approved')) {
     return (
@@ -147,7 +147,7 @@ export function MerchantProducts() {
       await reload();
     }, 'Product archived.');
 
-  if (!ready) return <p className="muted">Loading…</p>;
+  if (!ready) return <Skeleton lines={4} />;
   return (
     <div>
       <div className="row between">
@@ -230,7 +230,7 @@ export function MerchantInventory() {
       await reload();
     }, 'Threshold updated.');
 
-  if (!ready) return <p className="muted">Loading…</p>;
+  if (!ready) return <Skeleton lines={4} />;
   return (
     <div>
       <h1>🗄️ Inventory</h1>
@@ -254,7 +254,7 @@ export function MerchantInventory() {
                     onChange={(e) => setAdjust({ ...adjust, [i.product_id]: e.target.value })} />
                 </td>
                 <td>
-                  <input value={reason} onChange={(e) => setReason(e.target.value)} style={{ padding: 6, borderRadius: 6, border: '1px solid var(--line)' }} />
+                  <input className="text-input" value={reason} onChange={(e) => setReason(e.target.value)} />
                 </td>
                 <td><button className="btn small" onClick={() => applyAdjustment(i.product_id)}>Apply</button></td>
               </tr>
@@ -279,7 +279,7 @@ export function MerchantOrders() {
   const reload = (f = '') => run(() => api<any>('/merchant/orders', { query: { state: f } })).then((r) => r && setOrders(r.orders));
   useEffect(() => { if (store) reload(filter); }, [store, filter]);
 
-  if (!ready) return <p className="muted">Loading…</p>;
+  if (!ready) return <Skeleton lines={4} />;
   return (
     <div>
       <h1>🧾 Order queue</h1>
@@ -452,7 +452,7 @@ export function MerchantStaff() {
       await reload();
     }, 'Staff removed.');
 
-  if (!ready) return <p className="muted">Loading…</p>;
+  if (!ready) return <Skeleton lines={4} />;
   return (
     <div>
       <h1>👥 Staff</h1>
@@ -559,7 +559,7 @@ export function MerchantReports() {
 
   useEffect(() => { if (store) reload(); }, [store]);
 
-  if (!ready) return <p className="muted">Loading…</p>;
+  if (!ready) return <Skeleton lines={4} />;
   return (
     <div>
       <h1>📊 Reports</h1>

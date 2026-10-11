@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, rwf } from '../api';
 import { useAuth } from '../auth';
-import { Card, Field, Notice, ErrorMsg, Table, Empty, useFlash, StateBadge, PayBadge } from '../components';
+import { Card, Field, Notice, ErrorMsg, Table, Empty, Skeleton, useFlash, StateBadge, PayBadge } from '../components';
 
 /* ---------------- Discovery: Home ---------------- */
 export function Home() {
@@ -11,36 +11,49 @@ export function Home() {
   const [categories, setCategories] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [loaded, setLoaded] = useState(false);
   const { run } = useFlash();
 
   const load = (q = '', cat = '') =>
     run(async () => {
-      const [s, p, c] = await Promise.all([
-        api<any>('/stores', { query: { search: q } }),
-        api<any>('/products', { query: { search: q, category: cat } }),
-        api<any>('/categories')
-      ]);
-      setStores(s.stores);
-      setProducts(p.products);
-      setCategories(c.categories);
+      try {
+        const [s, p, c] = await Promise.all([
+          api<any>('/stores', { query: { search: q } }),
+          api<any>('/products', { query: { search: q, category: cat } }),
+          api<any>('/categories')
+        ]);
+        setStores(s.stores);
+        setProducts(p.products);
+        setCategories(c.categories);
+      } finally {
+        setLoaded(true); // stop skeletons even on error — the error notice shows instead
+      }
     });
 
   useEffect(() => { load(); }, []);
 
+  const loading = !loaded;
   return (
     <div>
-      <div className="searchbar">
-        <input
-          placeholder="Search products, SKUs or stores…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && load(search, category)}
-        />
-        <button className="btn" onClick={() => load(search, category)}>Search</button>
-      </div>
+      <section className="hero">
+        <h1>Everything your neighbourhood sells, one marketplace.</h1>
+        <p className="lead">
+          Shops across Kigali and East Africa — building materials, fashion, electronics —
+          with mobile-money checkout and live order tracking, in Rwandan francs.
+        </p>
+        <div className="searchbar">
+          <input
+            placeholder="Search products, SKUs or stores…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && load(search, category)}
+          />
+          <button className="btn" onClick={() => load(search, category)}>Search</button>
+        </div>
+      </section>
 
       <Card title="Stores" right={<span className="muted">{stores.length} open</span>}>
-        {stores.length === 0 ? <Empty>No stores found.</Empty> : (
+        {loading ? <Skeleton lines={2} /> : stores.length === 0 ? <Empty>No stores found.</Empty> : (
           <div className="grid cols-3">
             {stores.map((s) => (
               <Link key={s.id} to={`/store/${s.id}`} className="product-card" style={{ textDecoration: 'none', color: 'inherit' }}>
@@ -62,7 +75,7 @@ export function Home() {
           </select>
         }
       >
-        {products.length === 0 ? <Empty>No products match your search.</Empty> : (
+        {loading ? <Skeleton lines={3} /> : products.length === 0 ? <Empty>No products match your search.</Empty> : (
           <div className="grid cols-4">
             {products.map((p) => (
               <div key={p.id} className="product-card">

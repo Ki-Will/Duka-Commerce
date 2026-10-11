@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, rwf } from '../api';
-import { Card, Field, Notice, ErrorMsg, Table, Empty, useFlash, StateBadge, PayBadge } from '../components';
+import { Card, Field, Notice, ErrorMsg, Table, Empty, Skeleton, useFlash, StateBadge, PayBadge } from '../components';
 
 /* ---------------- Admin dashboard ---------------- */
 export function AdminHome() {
@@ -26,6 +26,7 @@ export function AdminHome() {
         <div className="stat"><div className="num">{count(data?.payments, 'state', 'Pending')}</div><div className="lbl">Pending payments</div></div>
         <div className="stat"><div className="num">{count(data?.stores, 'status', 'suspended')}</div><div className="lbl">Suspended stores</div></div>
       </div>
+      {!data && <Skeleton lines={2} />}
       <Card title="Governance">
         <div className="row">
           <Link className="btn" to="/admin/merchants">Approve merchants</Link>
@@ -226,7 +227,7 @@ export function AdminProducts() {
       <Notice kind="ok">{ok}</Notice>
       <Card>
         <div className="row">
-          <input className="searchbar" style={{ flex: 1, padding: '9px 10px', border: '1px solid var(--line)', borderRadius: 8 }}
+          <input className="text-input" style={{ flex: 1 }}
             placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
           <button className="btn ghost" onClick={() => reload(search)}>Search</button>
         </div>

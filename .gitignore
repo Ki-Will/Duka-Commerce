@@ -28,10 +28,11 @@ coverage/
 .nyc_output/
 *.tsbuildinfo
 
-# Vite
+# Vite + Vercel serverless bundle
 web/dist/
 web/.vite/
 **/.vite/
+api/index.js
 
 # TypeScript / Node.js
 *.js.map
