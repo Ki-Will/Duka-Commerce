@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "description": "DukaCommerce - East African multi-store e-commerce platform (school project, Phase 1)",
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
     "server",
     "web"
