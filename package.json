@@ -11,9 +11,9 @@
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev -w server",
+    "dev": "node api.js && npm run dev -w server",
     "dev:web": "npm run dev -w web",
-    "build": "npm run build -w web",
+    "build": "node api.js && npm run build -w web",
     "build:functions": "esbuild server/src/serverless.ts --bundle --platform=node --target=node22 --format=cjs --outfile=api/index.js --external:node:* --external:express --log-level=warning",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test": "npm run test -w server",
