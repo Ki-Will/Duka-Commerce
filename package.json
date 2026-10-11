@@ -1,0 +1,22 @@
+{
+  "name": "duka-commerce",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DukaCommerce - East African multi-store e-commerce platform (school project, Phase 1)",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "test": "npm run test -w server",
+    "seed": "npm run seed -w server"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}
