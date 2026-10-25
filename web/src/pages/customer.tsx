@@ -12,7 +12,7 @@ export function Home() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [loaded, setLoaded] = useState(false);
-  const { run } = useFlash();
+  const { error, run } = useFlash();
 
   const load = (q = '', cat = '') =>
     run(async () => {
@@ -35,6 +35,7 @@ export function Home() {
   const loading = !loaded;
   return (
     <div>
+      <ErrorMsg error={error} />
       <section className="hero">
         <h1>Everything your neighbourhood sells, one marketplace.</h1>
         <p className="lead">
