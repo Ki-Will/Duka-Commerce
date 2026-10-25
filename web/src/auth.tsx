@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api<{ user: Me }>('/auth/me');
+      const res = await api<{ user: Me | null }>('/auth/me');
       setUser(res.user);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setUser(null);
