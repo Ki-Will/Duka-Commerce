@@ -113,6 +113,7 @@ a, button { -webkit-tap-highlight-color: transparent; }
   display: flex; align-items: center; gap: 7px;
   transition: opacity 120ms ease;
 }
+.brand-mark { width: 34px; height: 34px; flex: none; border-radius: 10px; box-shadow: 0 2px 6px rgba(15, 118, 110, 0.18); }
 .brand b {
   background: linear-gradient(90deg, var(--brand), var(--brand-dark));
   -webkit-background-clip: text; background-clip: text;
