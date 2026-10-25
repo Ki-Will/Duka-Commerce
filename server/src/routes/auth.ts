@@ -16,7 +16,7 @@ import { notify } from '../services/notifications.js';
 import { wrap } from '../middleware.js';
 
 
-const EMAIL_RE = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function authRoutes(ctx: AppCtx): Router {
   const r = Router();
