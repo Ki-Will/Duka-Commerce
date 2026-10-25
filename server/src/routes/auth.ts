@@ -46,7 +46,7 @@ export function authRoutes(ctx: AppCtx): Router {
     await ctx.db
       .prepare(
         `INSERT INTO users (id, role, name, email, phone, password_hash, status, created_at)
-         VALUES (?, 'customer', ?, ?, ?, ?, ?)`
+         VALUES (?, 'customer', ?, ?, ?, ?, 'active', ?)`
       )
       .run(id, name.trim(), email.toLowerCase(), phone ?? null, hashPassword(password), now());
     const session = await createSession(ctx, id);
