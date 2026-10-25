@@ -12,12 +12,11 @@ import {
   verifyPassword
 } from '../services/auth.js';
 import { audit } from '../services/audit.js';
-import { requireAuth } from '../middleware.js';
 import { notify } from '../services/notifications.js';
 import { wrap } from '../middleware.js';
 
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
 
 export function authRoutes(ctx: AppCtx): Router {
   const r = Router();
@@ -47,7 +46,7 @@ export function authRoutes(ctx: AppCtx): Router {
     await ctx.db
       .prepare(
         `INSERT INTO users (id, role, name, email, phone, password_hash, status, created_at)
-         VALUES (?, 'customer', ?, ?, ?, ?, 'active', ?)`
+         VALUES (?, 'customer', ?, ?, ?, ?, ?)`
       )
       .run(id, name.trim(), email.toLowerCase(), phone ?? null, hashPassword(password), now());
     const session = await createSession(ctx, id);
@@ -89,8 +88,17 @@ export function authRoutes(ctx: AppCtx): Router {
     res.json({ ok: true });
   }));
 
-  r.get('/auth/me', requireAuth, wrap(async (req: Request, res: Response) => {
-    const user = req.user!;
+  /**
+   * Session discovery is intentionally public: unauthenticated visitors receive
+   * { user: null } so the frontend can render public pages without treating a
+   * missing session as an API failure. Protected routes still use requireAuth.
+   */
+  r.get('/auth/me', wrap(async (req: Request, res: Response) => {
+    const user = req.user;
+    if (!user) {
+      res.json({ user: null });
+      return;
+    }
     const merchant = await ctx.db
       .prepare('SELECT id, business_name, status FROM merchants WHERE owner_user_id = ?')
       .get(user.id);
