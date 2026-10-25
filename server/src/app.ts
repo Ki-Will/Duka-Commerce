@@ -8,23 +8,25 @@ import { merchantRoutes } from './routes/merchant.js';
 import { adminRoutes, supportRoutes } from './routes/admin.js';
 import { processCallback } from './services/payments/processor.js';
 import { AppError } from './domain/errors.js';
+import { wrap } from './middleware.js';
+
 
 export function createApp(ctx: AppCtx) {
   const app = express();
   app.disable('x-powered-by');
 
   app.use(requestContext(ctx));
-  app.use(attachSession(ctx));
+  app.use(wrap(attachSession(ctx)));
 
   // Payment webhook: raw body for HMAC verification (SEC-11) — mounted before JSON parsing.
   app.post(
     '/api/v1/payments/webhooks/:provider',
     express.raw({ type: '*/*', limit: '256kb' }),
-    (req: Request, res: Response) => {
+    wrap(async (req: Request, res: Response) => {
       const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body ?? '');
       const signature = req.headers['x-signature'] as string | undefined;
       try {
-        const outcome = processCallback(ctx, req.params.provider, raw, signature, req.traceId);
+        const outcome = await processCallback(ctx, req.params.provider, raw, signature, req.traceId);
         res.json({ received: true, ...outcome });
       } catch (err) {
         if (err instanceof AppError) {
@@ -33,16 +35,16 @@ export function createApp(ctx: AppCtx) {
         }
         res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Webhook processing failed.', traceId: req.traceId });
       }
-    }
+    })
   );
 
   app.use(express.json({ limit: '256kb' }));
 
   // Health without secret leakage (NFR-REL-01, NF-006).
-  app.get('/health', (_req: Request, res: Response) => {
+  app.get('/health', wrap(async (_req: Request, res: Response) => {
     let dbOk = false;
     try {
-      ctx.db.prepare('SELECT 1').get();
+      await ctx.db.prepare('SELECT 1').get();
       dbOk = true;
     } catch {
       dbOk = false;
@@ -52,9 +54,10 @@ export function createApp(ctx: AppCtx) {
       service: ctx.config.serviceName,
       environment: ctx.config.env,
       database: dbOk ? 'up' : 'down',
+      driver: ctx.db.driver,
       timestamp: new Date().toISOString()
     });
-  });
+  }));
 
   const api = express.Router();
   api.use(authRoutes(ctx));

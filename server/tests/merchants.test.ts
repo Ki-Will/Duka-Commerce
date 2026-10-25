@@ -30,7 +30,7 @@ describe('MER — Merchant onboarding & stores', () => {
   it('MER-002: admin approves merchant and the applicant becomes an owner', async () => {
     const { cookie, id } = await register(sys, { name: 'Owner', email: 'owner@test.com', password: 'password123' });
     const applied = await applyForMerchant(cookie);
-    const adminId = makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    const adminId = await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const { cookie: adminCookie } = await login(sys, 'admin@test.com', 'password123');
     const approve = await request(sys.app)
       .post(`/api/v1/admin/merchants/${applied.body.merchant.id}/approve`)
@@ -38,7 +38,7 @@ describe('MER — Merchant onboarding & stores', () => {
       .send({});
     expect(approve.status).toBe(200);
     expect(approve.body.merchant.status).toBe('approved');
-    const user = sys.ctx.db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string };
+    const user = await sys.ctx.db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string };
     expect(user.role).toBe('owner');
     // Store creation now allowed
     const store = await request(sys.app).post('/api/v1/merchant/store').set('Cookie', cookie).send({ name: 'Kigali Home' });
@@ -49,7 +49,7 @@ describe('MER — Merchant onboarding & stores', () => {
   it('MER-003: admin rejects merchant with reason; applicant stays inactive', async () => {
     const { cookie, id } = await register(sys, { name: 'Owner', email: 'owner@test.com', password: 'password123' });
     const applied = await applyForMerchant(cookie);
-    makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const { cookie: admin2 } = await login(sys, 'admin@test.com', 'password123');
     const reject = await request(sys.app)
       .post(`/api/v1/admin/merchants/${applied.body.merchant.id}/reject`)
@@ -58,7 +58,7 @@ describe('MER — Merchant onboarding & stores', () => {
     expect(reject.status).toBe(200);
     expect(reject.body.merchant.status).toBe('rejected');
     expect(reject.body.merchant.reason).toBe('Incomplete documents');
-    const user = sys.ctx.db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string };
+    const user = await sys.ctx.db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string };
     expect(user.role).toBe('customer');
     // Rejected merchant cannot create a store
     const store = await request(sys.app).post('/api/v1/merchant/store').set('Cookie', cookie).send({ name: 'Nope Store' });
@@ -83,13 +83,13 @@ describe('MER — Merchant onboarding & stores', () => {
       .set('Cookie', m.ownerCookie)
       .send({ description: 'Building materials in Kigali', contact: '+250 788 000 111' });
     expect(res.status).toBe(200);
-    const row = sys.ctx.db.prepare('SELECT description FROM stores WHERE id = ?').get(m.storeId) as { description: string };
+    const row = await sys.ctx.db.prepare('SELECT description FROM stores WHERE id = ?').get(m.storeId) as { description: string };
     expect(row.description).toBe('Building materials in Kigali');
   });
 
   it('MER-006: store can be closed and closed store blocks new orders', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const product = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    const product = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const close = await request(sys.app)
       .patch('/api/v1/merchant/store/status')
@@ -113,9 +113,9 @@ describe('MER — Merchant onboarding & stores', () => {
 
   it('MER-007: suspended store cannot accept new customer orders (BR-07)', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const product = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    const product = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
-    makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const { cookie: admin } = await login(sys, 'admin@test.com', 'password123');
     const suspend = await request(sys.app)
       .post(`/api/v1/admin/stores/${m.storeId}/status`)
@@ -160,7 +160,7 @@ describe('MER — Merchant onboarding & stores', () => {
   it('MER-009: staff of Store A cannot access Store B data', async () => {
     const a = await makeMerchant(sys, { ownerEmail: 'a@test.com', storeName: 'Store A' });
     const b = await makeMerchant(sys, { ownerEmail: 'b@test.com', storeName: 'Store B' });
-    const productB = addProduct(sys, { storeId: b.storeId, sku: 'B-001', name: 'Product B', price: 1000, stock: 5 });
+    const productB = await addProduct(sys, { storeId: b.storeId, sku: 'B-001', name: 'Product B', price: 1000, stock: 5 });
     await request(sys.app).post('/api/v1/merchant/staff').set('Cookie', a.ownerCookie)
       .send({ name: 'Staff A', email: 'staffa@test.com', password: 'password123', role: 'staff',
               perms: ['catalogue:write', 'orders:write', 'reports:read'] });
@@ -171,7 +171,7 @@ describe('MER — Merchant onboarding & stores', () => {
       .set('Cookie', staffCookie)
       .send({ name: 'Hijacked' });
     expect(editB.status).toBe(404);
-    const rowB = sys.ctx.db.prepare('SELECT name FROM products WHERE id = ?').get(productB) as { name: string };
+    const rowB = await sys.ctx.db.prepare('SELECT name FROM products WHERE id = ?').get(productB) as { name: string };
     expect(rowB.name).toBe('Product B');
     // Staff store context remains Store A
     const store = await request(sys.app).get('/api/v1/merchant/store').set('Cookie', staffCookie);
@@ -181,7 +181,7 @@ describe('MER — Merchant onboarding & stores', () => {
   it('MER-010: merchant store-setting changes create an audit event with actor/action/time', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
     await request(sys.app).patch('/api/v1/merchant/store').set('Cookie', m.ownerCookie).send({ description: 'Audited change' });
-    const audit = sys.ctx.db
+    const audit = await sys.ctx.db
       .prepare(`SELECT * FROM audit_events WHERE action = 'store.updated' AND entity_id = ?`)
       .get(m.storeId) as { actor_id: string; action: string; created_at: string } | undefined;
     expect(audit).toBeTruthy();

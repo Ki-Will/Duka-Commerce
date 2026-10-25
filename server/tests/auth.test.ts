@@ -72,14 +72,14 @@ describe('AU/CUS — Authentication & customer accounts', () => {
 
   it('AU-007: expired session is denied safely', async () => {
     const { cookie, id } = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
-    sys.ctx.db.prepare('UPDATE sessions SET expires_at = ? WHERE user_id = ?').run('2000-01-01T00:00:00.000Z', id);
+    await sys.ctx.db.prepare('UPDATE sessions SET expires_at = ? WHERE user_id = ?').run('2000-01-01T00:00:00.000Z', id);
     const me = await request(sys.app).get('/api/v1/auth/me').set('Cookie', cookie);
     expect(me.status).toBe(401);
   });
 
   it('AU-008: a customer cannot view another customer\'s order', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const product = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 100 });
+    const product = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 100 });
     const amina = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const eric = await register(sys, { name: 'Eric', email: 'eric@test.com', password: 'password123' });
     const { orderId, orderNumber } = await purchase(sys, { cookie: amina.cookie, storeId: m.storeId, productId: product });
@@ -96,7 +96,7 @@ describe('AU/CUS — Authentication & customer accounts', () => {
     expect(res.status).toBe(200);
     expect(res.body.user.name).toBe('Amina Updated');
     expect(res.body.user.phone).toBe('0788111222');
-    const row = sys.ctx.db.prepare('SELECT name FROM users WHERE id = ?').get(id) as { name: string };
+    const row = await sys.ctx.db.prepare('SELECT name FROM users WHERE id = ?').get(id) as { name: string };
     expect(row.name).toBe('Amina Updated');
   });
 
@@ -110,7 +110,7 @@ describe('AU/CUS — Authentication & customer accounts', () => {
     const edit = await request(sys.app).patch(`/api/v1/addresses/${addrId}`).set('Cookie', cookie).send({ line1: '45 KN Ave' });
     expect(edit.status).toBe(200);
     expect(edit.body.address.line1).toBe('45 KN Ave');
-    const row = sys.ctx.db.prepare('SELECT line1 FROM addresses WHERE id = ?').get(addrId) as { line1: string };
+    const row = await sys.ctx.db.prepare('SELECT line1 FROM addresses WHERE id = ?').get(addrId) as { line1: string };
     expect(row.line1).toBe('45 KN Ave');
     const other = await register(sys, { name: 'Eric', email: 'eric@test.com', password: 'password123' });
     const denied = await request(sys.app).patch(`/api/v1/addresses/${addrId}`).set('Cookie', other.cookie).send({ line1: 'Hacked' });
@@ -120,7 +120,7 @@ describe('AU/CUS — Authentication & customer accounts', () => {
 
   it('CUS-004: customer sees only their own orders', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const product = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 50 });
+    const product = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 50 });
     const amina = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const eric = await register(sys, { name: 'Eric', email: 'eric@test.com', password: 'password123' });
     await purchase(sys, { cookie: amina.cookie, storeId: m.storeId, productId: product });

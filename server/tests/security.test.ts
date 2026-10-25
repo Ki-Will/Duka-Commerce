@@ -18,7 +18,7 @@ describe('SEC — Security & privacy controls', () => {
 
   it('SEC-001: SQL injection probes are handled safely (parameterized queries)', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const payloads = [
       "' OR '1'='1",
       "'; DROP TABLE products; --",
@@ -37,12 +37,16 @@ describe('SEC — Security & privacy controls', () => {
       const cat = await request(sys.app).get('/api/v1/products').query({ category: payload });
       expect(cat.status).toBe(200);
     }
-    // Tables intact
-    const tables = sys.ctx.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as { name: string }[];
+    // Tables intact (introspection is dialect-aware: sqlite_master / information_schema)
+    const tableSql =
+      sys.ctx.db.driver === 'postgres'
+        ? `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public'`
+        : `SELECT name FROM sqlite_master WHERE type = 'table'`;
+    const tables = await sys.ctx.db.prepare(tableSql).all() as { name: string }[];
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(['products', 'orders', 'users']));
-    const products = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM products').get() as { c: number };
+    const products = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM products').get() as { c: number };
     expect(products.c).toBe(1);
-    const orderCount = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
+    const orderCount = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
     expect(orderCount.c).toBe(0);
   });
 
@@ -74,7 +78,7 @@ describe('SEC — Security & privacy controls', () => {
 
   it('SEC-003: IDOR probes across resources are denied', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 50 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 50 });
     const amina = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const eric = await register(sys, { name: 'Eric', email: 'eric@test.com', password: 'password123' });
     const addr = await request(sys.app).post('/api/v1/addresses').set('Cookie', amina.cookie)
@@ -91,7 +95,7 @@ describe('SEC — Security & privacy controls', () => {
     expect((await request(sys.app).get(`/api/v1/orders/${orderId}`).set('Cookie', eric.cookie)).status).toBe(404);
     expect((await request(sys.app).post(`/api/v1/orders/${orderId}/cancel`).set('Cookie', eric.cookie).send({})).status).toBe(404);
     // Eric cannot view Amina's payment
-    const paymentId = (sys.ctx.db.prepare('SELECT id FROM payments WHERE order_id = ?').get(orderId) as { id: string }).id;
+    const paymentId = (await sys.ctx.db.prepare('SELECT id FROM payments WHERE order_id = ?').get(orderId) as { id: string }).id;
     expect((await request(sys.app).get(`/api/v1/payments/${paymentId}`).set('Cookie', eric.cookie)).status).toBe(404);
     expect((await request(sys.app).post(`/api/v1/payments/${paymentId}/simulate`).set('Cookie', eric.cookie).send({ result: 'success' })).status).toBe(404);
     // Amina's data unchanged
@@ -104,14 +108,14 @@ describe('SEC — Security & privacy controls', () => {
       .send({ name: 'Sneaky', email: 'sneaky@test.com', password: 'password123', role: 'admin' });
     expect(res.status).toBe(201);
     expect(res.body.user.role).toBe('customer');
-    const row = sys.ctx.db.prepare('SELECT role FROM users WHERE email = ?').get('sneaky@test.com') as { role: string };
+    const row = await sys.ctx.db.prepare('SELECT role FROM users WHERE email = ?').get('sneaky@test.com') as { role: string };
     expect(row.role).toBe('customer');
     // Customer cannot use admin or merchant surfaces
     expect((await request(sys.app).get('/api/v1/admin/merchants').set('Cookie', res.headers['set-cookie']![0].split(';')[0])).status).toBe(403);
     expect((await request(sys.app).post('/api/v1/admin/categories').set('Cookie', res.headers['set-cookie']![0].split(';')[0]).send({ name: 'X' })).status).toBe(403);
     expect((await request(sys.app).post('/api/v1/merchant/store').set('Cookie', res.headers['set-cookie']![0].split(';')[0]).send({ name: 'X' })).status).toBe(403);
     // Support role cannot escalate to admin
-    makeUser(sys, { role: 'support', name: 'Support', email: 'support@test.com' });
+    await makeUser(sys, { role: 'support', name: 'Support', email: 'support@test.com' });
     const sup = await login(sys, 'support@test.com', 'password123');
     expect((await request(sys.app).get('/api/v1/admin/merchants').set('Cookie', sup.cookie)).status).toBe(403);
     expect((await request(sys.app).post('/api/v1/admin/categories').set('Cookie', sup.cookie).send({ name: 'X' })).status).toBe(403);
@@ -154,7 +158,7 @@ describe('SEC — Security & privacy controls', () => {
     expect(allLogs).not.toContain('scrypt');
     expect(allLogs).not.toMatch(/password_hash/);
     // Passwords are hashed at rest
-    const row = sys.ctx.db.prepare('SELECT password_hash FROM users WHERE email = ?').get('amina@test.com') as { password_hash: string };
+    const row = await sys.ctx.db.prepare('SELECT password_hash FROM users WHERE email = ?').get('amina@test.com') as { password_hash: string };
     expect(row.password_hash).not.toContain('supersecret123');
     expect(row.password_hash).toMatch(/^scrypt\$/);
   });
@@ -216,10 +220,10 @@ describe('SEC — Security & privacy controls', () => {
   });
 
   it('SEC-009: admin routes are protected from non-admin callers', async () => {
-    makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const adminSession = await login(sys, 'admin@test.com', 'password123');
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
-    makeUser(sys, { role: 'support', name: 'Support', email: 'support@test.com' });
+    await makeUser(sys, { role: 'support', name: 'Support', email: 'support@test.com' });
     const support = await login(sys, 'support@test.com', 'password123');
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
     const adminRoutesList = [
@@ -250,8 +254,8 @@ describe('SEC — Security & privacy controls', () => {
   it('SEC-010: merchant data isolation holds across all cross-access attempts (Critical)', async () => {
     const a = await makeMerchant(sys, { ownerEmail: 'a@test.com', storeName: 'Store A' });
     const b = await makeMerchant(sys, { ownerEmail: 'b@test.com', storeName: 'Store B' });
-    const productB = addProduct(sys, { storeId: b.storeId, sku: 'B-001', name: 'Product B', price: 5000, stock: 20 });
-    const productA = addProduct(sys, { storeId: a.storeId, sku: 'A-001', name: 'Product A', price: 9000, stock: 20 });
+    const productB = await addProduct(sys, { storeId: b.storeId, sku: 'B-001', name: 'Product B', price: 5000, stock: 20 });
+    const productA = await addProduct(sys, { storeId: a.storeId, sku: 'A-001', name: 'Product A', price: 9000, stock: 20 });
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const orderB = await purchase(sys, { cookie: customer.cookie, storeId: b.storeId, productId: productB, paymentMethod: 'cod' });
     // A's queue contains only A's orders
@@ -265,9 +269,9 @@ describe('SEC — Security & privacy controls', () => {
     expect((await request(sys.app).post(`/api/v1/merchant/products/${productB}/publish`).set('Cookie', a.ownerCookie)).status).toBe(404);
     expect((await request(sys.app).post('/api/v1/merchant/inventory/adjustments').set('Cookie', a.ownerCookie).send({ productId: productB, delta: -5 })).status).toBe(404);
     // B's data untouched
-    const rowB = sys.ctx.db.prepare('SELECT price FROM products WHERE id = ?').get(productB) as { price: number };
+    const rowB = await sys.ctx.db.prepare('SELECT price FROM products WHERE id = ?').get(productB) as { price: number };
     expect(rowB.price).toBe(5000);
-    const stockB = sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(productB) as { quantity: number };
+    const stockB = await sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(productB) as { quantity: number };
     expect(stockB.quantity).toBe(19);
     // A sees its own store context only
     const storeA = await request(sys.app).get('/api/v1/merchant/store').set('Cookie', a.ownerCookie);

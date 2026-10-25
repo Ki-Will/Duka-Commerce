@@ -54,11 +54,11 @@ export function requestContext(ctx: AppCtx) {
 }
 
 export function attachSession(ctx: AppCtx) {
-  return (req: Request, _res: Response, next: NextFunction) => {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     const cookies = parseCookies(req.headers.cookie);
     const token = cookies[ctx.config.cookieName];
     req.token = token;
-    const user = getSessionUser(ctx, token);
+    const user = await getSessionUser(ctx, token);
     if (user) req.user = user;
     next();
   };
@@ -75,6 +75,32 @@ export function requireRole(...roles: Role[]) {
     if (!roles.includes(req.user.role)) return next(errors.forbidden());
     next();
   };
+}
+
+/**
+ * Wrap a route handler or middleware so that *async* rejections reach the
+ * Express error handler instead of hanging the request. Express 4 only
+ * forwards synchronous throws; once handlers await the database they can
+ * reject, so every registration goes through this wrapper. Arity is copied
+ * onto the wrapper so 4-argument error handlers keep being recognised as
+ * such, and synchronous throws behave exactly as before.
+ */
+export function wrap<F extends Function>(fn: F): F {
+  const guarded = function (this: unknown, ...args: unknown[]): unknown {
+    const next = args[args.length - 1] as NextFunction | undefined;
+    try {
+      const out = fn.apply(this, args);
+      if (out && typeof (out as PromiseLike<unknown>).then === 'function') {
+        void (out as PromiseLike<unknown>).then(undefined, (err) => next?.(err));
+      }
+      return out;
+    } catch (err) {
+      next?.(err);
+      return undefined;
+    }
+  };
+  Object.defineProperty(guarded, 'length', { value: fn.length, configurable: true });
+  return guarded as unknown as F;
 }
 
 /** Central error handler: consistent structure, no stack traces to clients (§16). */

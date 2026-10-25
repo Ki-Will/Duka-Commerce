@@ -18,7 +18,7 @@ describe('PAY — Payments', () => {
   afterEach(() => sys.close());
 
   async function pendingOrder(opts: { paymentMethod?: 'momo' | 'card' | 'cod'; qty?: number } = {}) {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await cartWith(sys, customer.cookie, m.storeId, p, opts.qty ?? 1);
     const res = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie)
       .send({ cartId, deliveryMethod: 'pickup', paymentMethod: opts.paymentMethod ?? 'momo' });
@@ -40,11 +40,11 @@ describe('PAY — Payments', () => {
   it('PAY-001: payment initiation creates a unique payment attempt', async () => {
     const { paymentId } = await pendingOrder();
     expect(paymentId).toBeTruthy();
-    const row = sys.ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId!) as { state: string; provider_ref: string; amount: number };
+    const row = await sys.ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId!) as { state: string; provider_ref: string; amount: number };
     expect(row.state).toBe('Pending');
     expect(row.provider_ref).toMatch(/^MOMO-STUB-/);
     expect(row.amount).toBe(15000);
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments').get() as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments').get() as { c: number };
     expect(count.c).toBe(1);
   });
 
@@ -54,8 +54,8 @@ describe('PAY — Payments', () => {
       .send({ result: 'success' });
     expect(sim.status).toBe(200);
     expect(sim.body.outcome.status).toBe('applied');
-    expect(paymentState(sys, paymentId!)).toBe('Paid');
-    expect(orderState(sys, orderId)).toBe('Confirmed');
+    expect(await paymentState(sys, paymentId!)).toBe('Paid');
+    expect(await orderState(sys, orderId)).toBe('Confirmed');
     expect(total).toBe(15000);
   });
 
@@ -64,8 +64,8 @@ describe('PAY — Payments', () => {
     const sim = await request(sys.app).post(`/api/v1/payments/${paymentId}/simulate`).set('Cookie', customer.cookie)
       .send({ result: 'failure' });
     expect(sim.status).toBe(200);
-    expect(paymentState(sys, paymentId!)).toBe('Failed');
-    expect(orderState(sys, orderId)).toBe('PaymentFailed');
+    expect(await paymentState(sys, paymentId!)).toBe('Failed');
+    expect(await orderState(sys, orderId)).toBe('PaymentFailed');
   });
 
   it('PAY-004: payment timeout leaves payment non-final — never silently Paid (Critical)', async () => {
@@ -73,14 +73,14 @@ describe('PAY — Payments', () => {
     const sim = await request(sys.app).post(`/api/v1/payments/${paymentId}/simulate`).set('Cookie', customer.cookie)
       .send({ result: 'timeout' });
     expect(sim.status).toBe(200);
-    expect(paymentState(sys, paymentId!)).toBe('Expired');
-    expect(paymentState(sys, paymentId!)).not.toBe('Paid');
-    expect(orderState(sys, orderId)).toBe('PaymentFailed');
+    expect(await paymentState(sys, paymentId!)).toBe('Expired');
+    expect(await paymentState(sys, paymentId!)).not.toBe('Paid');
+    expect(await orderState(sys, orderId)).toBe('PaymentFailed');
     // Expired cannot be resurrected by a late success callback
     const late = await request(sys.app).post(`/api/v1/payments/${paymentId}/simulate`).set('Cookie', customer.cookie)
       .send({ result: 'success' });
     expect(late.status).toBe(400); // payment not awaiting result anymore
-    expect(paymentState(sys, paymentId!)).toBe('Expired');
+    expect(await paymentState(sys, paymentId!)).toBe('Expired');
   });
 
   it('PAY-005: duplicate callbacks are idempotently ignored (Critical)', async () => {
@@ -88,7 +88,7 @@ describe('PAY — Payments', () => {
     const adapter = getAdapter(sys.ctx);
     const payload = { externalEventId: 'EVT-DUP-1', providerRef: 'MOMO-STUB-X', result: 'success', amount: total };
     // Align provider ref with the actual payment
-    const pref = (sys.ctx.db.prepare('SELECT provider_ref FROM payments WHERE id = ?').get(paymentId!) as { provider_ref: string }).provider_ref;
+    const pref = (await sys.ctx.db.prepare('SELECT provider_ref FROM payments WHERE id = ?').get(paymentId!) as { provider_ref: string }).provider_ref;
     payload.providerRef = pref;
     const first = await sendCallback(paymentId!, payload);
     expect(first.status).toBe(200);
@@ -97,20 +97,20 @@ describe('PAY — Payments', () => {
     expect(second.status).toBe(200);
     expect(second.body.status).toBe('duplicate');
     // Exactly one Paid event and one confirmation
-    expect(paymentState(sys, paymentId!)).toBe('Paid');
-    expect(orderState(sys, orderId)).toBe('Confirmed');
-    const confirmEvents = sys.ctx.db
+    expect(await paymentState(sys, paymentId!)).toBe('Paid');
+    expect(await orderState(sys, orderId)).toBe('Confirmed');
+    const confirmEvents = await sys.ctx.db
       .prepare(`SELECT COUNT(*) AS c FROM audit_events WHERE entity_id = ? AND action = 'order.state_changed' AND detail LIKE '%"to":"Confirmed"%'`)
       .get(orderId) as { c: number };
     expect(confirmEvents.c).toBe(1);
-    const eventRows = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payment_events WHERE external_event_id = ?').get('EVT-DUP-1') as { c: number };
+    const eventRows = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payment_events WHERE external_event_id = ?').get('EVT-DUP-1') as { c: number };
     expect(eventRows.c).toBe(1);
     expect(adapter.provider).toBe('momo');
   });
 
   it('PAY-006: invalid/unauthenticated callbacks are rejected and logged safely (Critical)', async () => {
     const { paymentId, total } = await pendingOrder();
-    const pref = (sys.ctx.db.prepare('SELECT provider_ref FROM payments WHERE id = ?').get(paymentId!) as { provider_ref: string }).provider_ref;
+    const pref = (await sys.ctx.db.prepare('SELECT provider_ref FROM payments WHERE id = ?').get(paymentId!) as { provider_ref: string }).provider_ref;
     const payload = { externalEventId: 'EVT-BAD-1', providerRef: pref, result: 'success', amount: total };
     // No signature
     const unsigned = await sendCallback(paymentId!, payload, { sign: false });
@@ -131,46 +131,46 @@ describe('PAY — Payments', () => {
     expect(malformed.status).toBe(400);
     expect(malformed.body.code).toBe('INVALID_CALLBACK');
     // No state change, nothing applied, rejection audited
-    expect(paymentState(sys, paymentId!)).toBe('Pending');
-    const rejected = sys.ctx.db
+    expect(await paymentState(sys, paymentId!)).toBe('Pending');
+    const rejected = await sys.ctx.db
       .prepare(`SELECT COUNT(*) AS c FROM audit_events WHERE action = 'payment.callback.rejected'`)
       .get() as { c: number };
     expect(rejected.c).toBe(3);
-    const events = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payment_events').get() as { c: number };
+    const events = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payment_events').get() as { c: number };
     expect(events.c).toBe(0);
     // Error responses carry no stack traces or SQL
     expect(JSON.stringify(wrong.body)).not.toMatch(/stack|SELECT |sqlite/i);
   });
 
   it('PAY-007: duplicate payment request with same idempotency key creates one attempt', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await cartWith(sys, customer.cookie, m.storeId, p, 1);
     const body = { cartId, deliveryMethod: 'pickup', paymentMethod: 'momo', idempotencyKey: 'pay-key-1' };
     const r1 = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie).send(body);
     const r2 = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie).send(body);
     expect(r1.body.payment.id).toBe(r2.body.payment.id);
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments').get() as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments').get() as { c: number };
     expect(count.c).toBe(1);
     // Explicit duplicate payment initiation with same key also reuses
     const init1 = await request(sys.app).post('/api/v1/payments').set('Cookie', customer.cookie)
       .send({ orderId: r1.body.order.id, idempotencyKey: 'pay-key-1:pay' });
     expect(init1.status).toBe(200);
-    const count2 = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments').get() as { c: number };
+    const count2 = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments').get() as { c: number };
     expect(count2.c).toBe(1);
   });
 
   it('PAY-008: payment amount tampering is rejected server-side (Critical)', async () => {
     const { paymentId, total } = await pendingOrder();
-    const pref = (sys.ctx.db.prepare('SELECT provider_ref FROM payments WHERE id = ?').get(paymentId!) as { provider_ref: string }).provider_ref;
+    const pref = (await sys.ctx.db.prepare('SELECT provider_ref FROM payments WHERE id = ?').get(paymentId!) as { provider_ref: string }).provider_ref;
     const tampered = await sendCallback(paymentId!, {
       externalEventId: 'EVT-TAMPER-1', providerRef: pref, result: 'success', amount: total - 5000
     });
     expect(tampered.status).toBe(400);
     expect(tampered.body.code).toBe('AMOUNT_MISMATCH');
-    expect(paymentState(sys, paymentId!)).toBe('Pending');
-    expect(orderState(sys, (sys.ctx.db.prepare('SELECT order_id FROM payments WHERE id = ?').get(paymentId!) as { order_id: string }).order_id))
+    expect(await paymentState(sys, paymentId!)).toBe('Pending');
+    expect(await orderState(sys, (await sys.ctx.db.prepare('SELECT order_id FROM payments WHERE id = ?').get(paymentId!) as { order_id: string }).order_id))
       .toBe('PendingPayment');
-    const rej = sys.ctx.db
+    const rej = await sys.ctx.db
       .prepare(`SELECT COUNT(*) AS c FROM audit_events WHERE action = 'payment.callback.rejected' AND detail LIKE '%amount_mismatch%'`)
       .get() as { c: number };
     expect(rej.c).toBe(1);
@@ -187,7 +187,7 @@ describe('PAY — Payments', () => {
   });
 
   it('PAY-010: operator reconciliation view shows consistent payment status and references', async () => {
-    makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const { cookie: adminCookie } = await login(sys, 'admin@test.com', 'password123');
     const { paymentId, orderId } = await pendingOrder();
     await request(sys.app).post(`/api/v1/payments/${paymentId}/simulate`).set('Cookie', customer.cookie)
@@ -204,13 +204,13 @@ describe('PAY — Payments', () => {
   });
 
   it('PAY-011: refund is initiated with the correct amount and state', async () => {
-    const { orderId } = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 }) });
+    const { orderId } = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 }) });
     const res = await request(sys.app).post(`/api/v1/merchant/orders/${orderId}/refund`)
       .set('Cookie', m.ownerCookie).send({ reason: 'Defective goods' });
     expect(res.status).toBe(201);
     expect(res.body.refund.amount).toBe(15000);
     expect(res.body.refund.state).toBe('pending');
-    const pay = sys.ctx.db.prepare('SELECT state FROM payments WHERE order_id = ?').get(orderId) as { state: string };
+    const pay = await sys.ctx.db.prepare('SELECT state FROM payments WHERE order_id = ?').get(orderId) as { state: string };
     expect(pay.state).toBe('RefundPending');
     // Complete refund via sandbox confirmation
     const done = await request(sys.app)
@@ -218,12 +218,12 @@ describe('PAY — Payments', () => {
       .set('Cookie', m.ownerCookie).send({ success: true });
     expect(done.status).toBe(200);
     expect(done.body.refund.state).toBe('succeeded');
-    const pay2 = sys.ctx.db.prepare('SELECT state FROM payments WHERE order_id = ?').get(orderId) as { state: string };
+    const pay2 = await sys.ctx.db.prepare('SELECT state FROM payments WHERE order_id = ?').get(orderId) as { state: string };
     expect(pay2.state).toBe('Refunded');
   });
 
   it('PAY-012: duplicate refund request does not double-refund (Critical)', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const { orderId } = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: p });
     const r1 = await request(sys.app).post(`/api/v1/merchant/orders/${orderId}/refund`)
       .set('Cookie', m.ownerCookie).send({ reason: 'Defective', idempotencyKey: 'refund-1' });
@@ -236,7 +236,7 @@ describe('PAY — Payments', () => {
     const r3 = await request(sys.app).post(`/api/v1/merchant/orders/${orderId}/refund`)
       .set('Cookie', m.ownerCookie).send({ reason: 'Again' });
     expect(r3.status).toBe(200);
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM refunds').get() as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM refunds').get() as { c: number };
     expect(count.c).toBe(1);
   });
 
@@ -252,13 +252,13 @@ describe('PAY — Payments', () => {
     const { orderId, paymentId } = await pendingOrder();
     await request(sys.app).post(`/api/v1/payments/${paymentId}/simulate`).set('Cookie', customer.cookie)
       .send({ result: 'failure' });
-    expect(orderState(sys, orderId)).toBe('PaymentFailed');
+    expect(await orderState(sys, orderId)).toBe('PaymentFailed');
     const retry = await request(sys.app).post('/api/v1/payments').set('Cookie', customer.cookie)
       .send({ orderId, idempotencyKey: 'retry-1' });
     expect(retry.status).toBe(201);
-    expect(orderState(sys, orderId)).toBe('PendingPayment');
+    expect(await orderState(sys, orderId)).toBe('PendingPayment');
     expect(retry.body.payment.id).not.toBe(paymentId);
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(orderId) as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(orderId) as { c: number };
     expect(count.c).toBe(2);
   });
 });

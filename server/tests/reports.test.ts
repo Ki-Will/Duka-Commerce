@@ -14,8 +14,8 @@ describe('RPT — Reporting', () => {
   afterEach(() => sys.close());
 
   async function seedOrders() {
-    const cement = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
-    const hammer = addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Hammer', price: 8500, stock: 40 });
+    const cement = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const hammer = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Hammer', price: 8500, stock: 40 });
     const o1 = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: cement, quantity: 2, paymentMethod: 'cod' });
     const o2 = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: hammer, quantity: 1, paymentMethod: 'cod' });
     const o3 = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: cement, quantity: 1, paymentMethod: 'cod' });
@@ -40,7 +40,7 @@ describe('RPT — Reporting', () => {
     expect(cancelRes.status).toBe(200);
     const res = await request(sys.app).get('/api/v1/merchant/reports/summary').set('Cookie', m.ownerCookie);
     const byState = Object.fromEntries(res.body.byState.map((r: { state: string; count: number }) => [r.state, r.count]));
-    const dbCounts = sys.ctx.db.prepare('SELECT state, COUNT(*) AS c FROM orders WHERE store_id = ? GROUP BY state').all(m.storeId) as {
+    const dbCounts = await sys.ctx.db.prepare('SELECT state, COUNT(*) AS c FROM orders WHERE store_id = ? GROUP BY state').all(m.storeId) as {
       state: string; c: number;
     }[];
     for (const row of dbCounts) {
@@ -60,8 +60,8 @@ describe('RPT — Reporting', () => {
     expect(res.status).toBe(200);
     const cementRow = res.body.inventory.find((i: { product_id: string }) => i.product_id === cement);
     const hammerRow = res.body.inventory.find((i: { product_id: string }) => i.product_id === hammer);
-    const dbCement = sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(cement) as { quantity: number };
-    const dbHammer = sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(hammer) as { quantity: number };
+    const dbCement = await sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(cement) as { quantity: number };
+    const dbHammer = await sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(hammer) as { quantity: number };
     expect(cementRow.quantity).toBe(dbCement.quantity); // 100 - 2 - 1 = 97
     expect(cementRow.quantity).toBe(97);
     expect(hammerRow.quantity).toBe(dbHammer.quantity); // 40 - 1 = 39
@@ -83,7 +83,7 @@ describe('RPT — Reporting', () => {
     const cancelRes = await request(sys.app).post(`/api/v1/orders/${o2.orderId}/cancel`).set('Cookie', customer.cookie).send({ reason: 'changed mind' });
     expect(cancelRes.status).toBe(200);
     // Paid order + refund
-    const paid = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: addProduct(sys, { storeId: m.storeId, sku: 'KHS-003', name: 'Trowel', price: 2000, stock: 30 }) });
+    const paid = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: await addProduct(sys, { storeId: m.storeId, sku: 'KHS-003', name: 'Trowel', price: 2000, stock: 30 }) });
     const refund = await request(sys.app).post(`/api/v1/merchant/orders/${paid.orderId}/refund`)
       .set('Cookie', m.ownerCookie).send({ reason: 'damaged' });
     expect(refund.status).toBe(201);
@@ -98,7 +98,7 @@ describe('RPT — Reporting', () => {
 
   it('RPT-006: admin platform report shows platform-wide metrics', async () => {
     await seedOrders();
-    makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const { cookie: adminCookie } = await login(sys, 'admin@test.com', 'password123');
     const res = await request(sys.app).get('/api/v1/admin/reports/overview').set('Cookie', adminCookie);
     expect(res.status).toBe(200);
@@ -114,7 +114,7 @@ describe('RPT — Reporting', () => {
   it('RPT-007: merchant reports are isolated per store (Critical)', async () => {
     await seedOrders(); // Kigali Home: 3 orders, 53500
     const other = await makeMerchant(sys, { ownerEmail: 'tech@test.com', storeName: 'Tech Corner' });
-    const otherProduct = addProduct(sys, { storeId: other.storeId, sku: 'TC-001', name: 'Cable', price: 7500, stock: 60 });
+    const otherProduct = await addProduct(sys, { storeId: other.storeId, sku: 'TC-001', name: 'Cable', price: 7500, stock: 60 });
     const buyer2 = await register(sys, { name: 'Eric', email: 'eric@test.com', password: 'password123' });
     await purchase(sys, { cookie: buyer2.cookie, storeId: other.storeId, productId: otherProduct, quantity: 2, paymentMethod: 'cod' });
     // Kigali Home sees only its own data
@@ -133,7 +133,7 @@ describe('RPT — Reporting', () => {
   it('RPT-008: date range boundaries are respected', async () => {
     const { o1 } = await seedOrders();
     // Move one order into the past
-    sys.ctx.db.prepare('UPDATE orders SET created_at = ? WHERE id = ?').run('2020-01-01T12:00:00.000Z', o1.orderId);
+    await sys.ctx.db.prepare('UPDATE orders SET created_at = ? WHERE id = ?').run('2020-01-01T12:00:00.000Z', o1.orderId);
     const all = await request(sys.app).get('/api/v1/merchant/reports/summary').set('Cookie', m.ownerCookie);
     expect(all.body.totals.order_count).toBe(3);
     const since2021 = await request(sys.app).get('/api/v1/merchant/reports/summary')

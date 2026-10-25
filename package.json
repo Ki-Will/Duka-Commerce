@@ -22,5 +22,9 @@
   "allowScripts": {
     "esbuild@0.28.2": true,
     "esbuild@0.25.12": true
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.4",
+    "@neon/env": "^1.6.5"
   }
 }

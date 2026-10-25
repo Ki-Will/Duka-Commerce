@@ -20,7 +20,7 @@ describe('CART — Cart & checkout', () => {
   }
 
   it('CART-001: adding an in-stock product creates the correct cart line', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     const add = await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
@@ -32,7 +32,7 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('CART-002: changing quantity recalculates the cart', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
@@ -47,7 +47,7 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('CART-003: removing an item empties the line', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 1 });
@@ -59,8 +59,8 @@ describe('CART — Cart & checkout', () => {
 
   it('CART-004: carts are store-scoped — cross-store products get separate carts', async () => {
     const other = await makeMerchant(sys, { ownerEmail: 'tech@test.com', storeName: 'Tech Corner' });
-    const pa = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
-    const pb = addProduct(sys, { storeId: other.storeId, sku: 'TC-001', name: 'USB-C Cable', price: 7500, stock: 60 });
+    const pa = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const pb = await addProduct(sys, { storeId: other.storeId, sku: 'TC-001', name: 'USB-C Cable', price: 7500, stock: 60 });
     const cartA = await newCart(m.storeId);
     const cartB = await newCart(other.storeId);
     expect(cartA).not.toBe(cartB);
@@ -80,38 +80,38 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('CART-005: checkout is blocked when the product is out of stock — no order created', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
     // Stock is exhausted externally (e.g. another order won the race)
-    sys.ctx.db.prepare('UPDATE inventory_items SET quantity = 0 WHERE product_id = ?').run(p);
+    await sys.ctx.db.prepare('UPDATE inventory_items SET quantity = 0 WHERE product_id = ?').run(p);
     const order = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie)
       .send({ cartId, deliveryMethod: 'pickup', paymentMethod: 'cod' });
     expect(order.status).toBe(400);
     expect(order.body.code).toBe('ORDER_STOCK_UNAVAILABLE');
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
     expect(count.c).toBe(0);
   });
 
   it('CART-006: checkout blocked when cart quantity exceeds available stock', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 5 });
     // Inventory reduced after the item entered the cart
-    sys.ctx.db.prepare('UPDATE inventory_items SET quantity = 2 WHERE product_id = ?').run(p);
+    await sys.ctx.db.prepare('UPDATE inventory_items SET quantity = 2 WHERE product_id = ?').run(p);
     const order = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie)
       .send({ cartId, deliveryMethod: 'pickup', paymentMethod: 'cod' });
     expect(order.status).toBe(400);
     expect(order.body.code).toBe('ORDER_STOCK_UNAVAILABLE');
     expect(order.body.message).toMatch(/no longer available/i);
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
     expect(count.c).toBe(0);
   });
 
   it('CART-007: price is revalidated at checkout — current valid price is used', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
@@ -121,12 +121,12 @@ describe('CART — Cart & checkout', () => {
       .send({ cartId, deliveryMethod: 'pickup', paymentMethod: 'cod' });
     expect(order.status).toBe(201);
     expect(order.body.order.subtotal).toBe(34000); // 2 × 17000, stale price not used
-    const items = sys.ctx.db.prepare('SELECT unit_price FROM order_items WHERE order_id = ?').all(order.body.order.id) as { unit_price: number }[];
+    const items = await sys.ctx.db.prepare('SELECT unit_price FROM order_items WHERE order_id = ?').all(order.body.order.id) as { unit_price: number }[];
     expect(items[0].unit_price).toBe(17000);
   });
 
   it('CART-008: client-supplied discount is ignored — totals computed server-side', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
@@ -139,7 +139,7 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('CART-009: delivery checkout requires a delivery address', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 1 });
@@ -147,7 +147,7 @@ describe('CART — Cart & checkout', () => {
       .send({ cartId, deliveryMethod: 'delivery', paymentMethod: 'cod' });
     expect(noAddr.status).toBe(400);
     expect(noAddr.body.code).toBe('ADDRESS_REQUIRED');
-    const addrId = addAddress(sys, customer.id);
+    const addrId = await addAddress(sys, customer.id);
     const withAddr = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie)
       .send({ cartId, addressId: addrId, deliveryMethod: 'delivery', paymentMethod: 'cod' });
     expect(withAddr.status).toBe(201);
@@ -157,14 +157,14 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('CART-010: total arithmetic — subtotal + delivery fee − discount', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
-    const p2 = addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Hammer', price: 8500, stock: 40 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p2 = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Hammer', price: 8500, stock: 40 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p2, quantity: 1 });
-    const addrId = addAddress(sys, customer.id);
+    const addrId = await addAddress(sys, customer.id);
     const order = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie)
       .send({ cartId, addressId: addrId, deliveryMethod: 'delivery', paymentMethod: 'cod' });
     expect(order.status).toBe(201);
@@ -176,7 +176,7 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('CART-011: double-submitting checkout creates only one order', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 1 });
@@ -188,15 +188,15 @@ describe('CART — Cart & checkout', () => {
     expect(r1.status).toBe(201);
     expect(r2.status).toBe(201);
     expect(r1.body.order.id).toBe(r2.body.order.id);
-    const count = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
+    const count = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM orders').get() as { c: number };
     expect(count.c).toBe(1);
     // stock decremented exactly once
-    const stock = sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(p) as { quantity: number };
+    const stock = await sys.ctx.db.prepare('SELECT quantity FROM inventory_items WHERE product_id = ?').get(p) as { quantity: number };
     expect(stock.quantity).toBe(99);
   });
 
   it('CART-012: customer sees a full checkout summary from the cart', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 100 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 2 });
@@ -214,7 +214,7 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('out-of-stock product cannot be added to cart', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-009', name: 'Gone', price: 100, stock: 0 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-009', name: 'Gone', price: 100, stock: 0 });
     const cartId = await newCart(m.storeId);
     const add = await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 1 });
@@ -223,7 +223,7 @@ describe('CART — Cart & checkout', () => {
   });
 
   it('carts are private to their owner', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const cartId = await newCart(m.storeId);
     await request(sys.app).post(`/api/v1/carts/${cartId}/items`).set('Cookie', customer.cookie)
       .send({ productId: p, quantity: 1 });

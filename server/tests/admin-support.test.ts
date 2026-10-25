@@ -7,7 +7,7 @@ describe('ADM — Platform administration', () => {
   let admin: { cookie: string; id: string };
   beforeEach(async () => {
     sys = system();
-    makeUser(sys, { role: 'admin', name: 'Platform Admin', email: 'admin@test.com' });
+    await makeUser(sys, { role: 'admin', name: 'Platform Admin', email: 'admin@test.com' });
     const session = await login(sys, 'admin@test.com', 'password123');
     admin = { cookie: session.cookie, id: session.user.id };
   });
@@ -33,14 +33,14 @@ describe('ADM — Platform administration', () => {
 
   it('ADM-002: suspending a merchant suspends the store and blocks purchases (Critical)', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const suspend = await request(sys.app).post(`/api/v1/admin/merchants/${m.merchantId}/suspend`)
       .set('Cookie', admin.cookie).send({ reason: 'Fraud investigation' });
     expect(suspend.status).toBe(200);
     expect(suspend.body.merchant.status).toBe('suspended');
     // Store auto-suspended
-    const storeRow = sys.ctx.db.prepare('SELECT status FROM stores WHERE id = ?').get(m.storeId) as { status: string };
+    const storeRow = await sys.ctx.db.prepare('SELECT status FROM stores WHERE id = ?').get(m.storeId) as { status: string };
     expect(storeRow.status).toBe('suspended');
     const cartId = await cartWith(sys, customer.cookie, m.storeId, p, 1);
     const order = await request(sys.app).post('/api/v1/orders').set('Cookie', customer.cookie)
@@ -71,7 +71,7 @@ describe('ADM — Platform administration', () => {
 
   it('ADM-004: admin suspends a product making it unavailable for purchase', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     const susp = await request(sys.app).post(`/api/v1/admin/products/${p}/status`)
       .set('Cookie', admin.cookie).send({ status: 'suspended', reason: 'Counterfeit concern' });
@@ -112,7 +112,7 @@ describe('ADM — Platform administration', () => {
 
   it('admin operational views list merchants, orders and users', async () => {
     const m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
     await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: p, paymentMethod: 'cod' });
     const merchants = await request(sys.app).get('/api/v1/admin/merchants').set('Cookie', admin.cookie);
@@ -141,12 +141,12 @@ describe('SUP — Support investigation', () => {
   let orderId: string;
   beforeEach(async () => {
     sys = system();
-    makeUser(sys, { role: 'support', name: 'Support Agent', email: 'support@test.com' });
+    await makeUser(sys, { role: 'support', name: 'Support Agent', email: 'support@test.com' });
     const session = await login(sys, 'support@test.com', 'password123');
     support = { cookie: session.cookie };
     m = await makeMerchant(sys, { ownerEmail: 'm@test.com', storeName: 'Kigali Home' });
     customer = await register(sys, { name: 'Amina', email: 'amina@test.com', password: 'password123' });
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 100 });
     const created = await purchase(sys, { cookie: customer.cookie, storeId: m.storeId, productId: p, paymentMethod: 'momo' });
     orderNumber = created.orderNumber;
     orderId = created.orderId;
@@ -186,14 +186,14 @@ describe('SUP — Support investigation', () => {
     // Cannot mutate payments
     const payments = await request(sys.app).get('/api/v1/admin/payments').set('Cookie', support.cookie);
     expect(payments.status).toBe(403);
-    expect(orderState(sys, orderId)).toBe('Confirmed');
-    const refundCount = sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM refunds').get() as { c: number };
+    expect(await orderState(sys, orderId)).toBe('Confirmed');
+    const refundCount = await sys.ctx.db.prepare('SELECT COUNT(*) AS c FROM refunds').get() as { c: number };
     expect(refundCount.c).toBe(0);
   });
 
   it('SUP-003: support lookups are audited', async () => {
     await request(sys.app).get(`/api/v1/support/orders/${orderNumber}`).set('Cookie', support.cookie);
-    const entries = sys.ctx.db
+    const entries = await sys.ctx.db
       .prepare(`SELECT * FROM audit_events WHERE action = 'support.order_lookup'`)
       .all() as { actor_id: string; entity_id: string; created_at: string }[];
     expect(entries).toHaveLength(1);
@@ -201,7 +201,7 @@ describe('SUP — Support investigation', () => {
     expect(new Date(entries[0].created_at).getTime()).toBeGreaterThan(0);
     // Customer search also audited
     await request(sys.app).get('/api/v1/support/customers').set('Cookie', support.cookie).query({ search: 'amina' });
-    const searchAudit = sys.ctx.db
+    const searchAudit = await sys.ctx.db
       .prepare(`SELECT COUNT(*) AS c FROM audit_events WHERE action = 'support.customer_lookup'`)
       .get() as { c: number };
     expect(searchAudit.c).toBe(1);

@@ -48,16 +48,16 @@ function nextOrderNumber(): string {
   return `DC-${ymd}-${String(orderCounter).padStart(4, '0')}-${rand}`;
 }
 
-export function findByIdempotencyKey(ctx: AppCtx, key: string): OrderRow | undefined {
-  return ctx.db.prepare('SELECT * FROM orders WHERE idempotency_key = ?').get(key) as OrderRow | undefined;
+export async function findByIdempotencyKey(ctx: AppCtx, key: string): Promise<OrderRow | undefined> {
+  return await ctx.db.prepare('SELECT * FROM orders WHERE idempotency_key = ?').get(key) as OrderRow | undefined;
 }
 
-export function getOrderRow(ctx: AppCtx, orderId: string): OrderRow | undefined {
-  return ctx.db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as OrderRow | undefined;
+export async function getOrderRow(ctx: AppCtx, orderId: string): Promise<OrderRow | undefined> {
+  return await ctx.db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as OrderRow | undefined;
 }
 
-export function getOrderItems(ctx: AppCtx, orderId: string) {
-  return ctx.db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
+export async function getOrderItems(ctx: AppCtx, orderId: string) {
+  return await ctx.db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
 }
 
 /**
@@ -65,9 +65,9 @@ export function getOrderItems(ctx: AppCtx, orderId: string) {
  * One transaction: validate product state → revalidate price → atomic stock
  * reservation → order creation → event/notification records (SRS §11.4).
  */
-export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
+export async function checkout(ctx: AppCtx, input: CheckoutInput): Promise<OrderRow> {
   if (input.idempotencyKey) {
-    const existing = findByIdempotencyKey(ctx, input.idempotencyKey);
+    const existing = await findByIdempotencyKey(ctx, input.idempotencyKey);
     if (existing) {
       if (existing.customer_id !== input.customerId) {
         throw errors.conflict('IDEMPOTENCY_CONFLICT', 'Idempotency key already used.');
@@ -76,13 +76,14 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
     }
   }
 
-  return tx(ctx.db, () => {
-    const cart = ctx.db.prepare('SELECT * FROM carts WHERE id = ? AND customer_id = ?').get(input.cartId, input.customerId) as
+  try {
+    return await tx(ctx.db, async () => {
+    const cart = await ctx.db.prepare('SELECT * FROM carts WHERE id = ? AND customer_id = ?').get(input.cartId, input.customerId) as
       | { id: string; store_id: string; customer_id: string }
       | undefined;
     if (!cart) throw errors.notFound('Cart not found.');
 
-    const store = ctx.db
+    const store = await ctx.db
       .prepare('SELECT s.*, m.status AS merchant_status FROM stores s JOIN merchants m ON m.id = s.merchant_id WHERE s.id = ?')
       .get(cart.store_id) as { id: string; name: string; status: string; merchant_status: string } | undefined;
     if (!store) throw errors.notFound('Store not found.');
@@ -93,7 +94,7 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
       throw errors.conflict('STORE_NOT_ACCEPTING_ORDERS', 'This store is not accepting orders.');
     }
 
-    const items = ctx.db
+    const items = await ctx.db
       .prepare(
         `SELECT ci.product_id, ci.quantity, p.name, p.sku, p.price, p.status, p.store_id
          FROM cart_items ci JOIN products p ON p.id = ci.product_id WHERE ci.cart_id = ?`
@@ -127,7 +128,7 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
       if (!input.addressId) {
         throw errors.badRequest('ADDRESS_REQUIRED', 'A delivery address is required.');
       }
-      const addr = ctx.db
+      const addr = await ctx.db
         .prepare('SELECT * FROM addresses WHERE id = ? AND user_id = ?')
         .get(input.addressId, input.customerId) as
         | { id: string; name: string; line1: string; line2: string; city: string; phone: string }
@@ -141,7 +142,7 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
         phone: addr.phone
       };
     } else {
-      const customer = ctx.db.prepare('SELECT name, phone FROM users WHERE id = ?').get(input.customerId) as
+      const customer = await ctx.db.prepare('SELECT name, phone FROM users WHERE id = ?').get(input.customerId) as
         | { name: string; phone: string | null }
         | undefined;
       addressSnapshot = { name: customer?.name ?? '', line1: 'Store pickup', line2: '', city: '', phone: customer?.phone ?? '' };
@@ -158,7 +159,7 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
     const state: OrderState = input.paymentMethod === 'cod' ? 'Confirmed' : 'PendingPayment'; // COD accepted
     const ts = now();
 
-    ctx.db
+    await ctx.db
       .prepare(
         `INSERT INTO orders (id, order_number, customer_id, store_id, state, payment_method, delivery_method,
            subtotal, delivery_fee, discount, total, address_id, address_snapshot, notes, idempotency_key,
@@ -187,20 +188,20 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
 
     for (const item of items) {
       const lineTotal = item.quantity * item.price;
-      ctx.db
+      await ctx.db
         .prepare(
           `INSERT INTO order_items (id, order_id, product_id, product_name, sku, unit_price, quantity, discount, line_total)
            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
         )
         .run(uuid(), orderId, item.product_id, item.name, item.sku, item.price, item.quantity, lineTotal);
       // Stock reservation/commit is server-controlled (FR-INV-04/05).
-      reserveStock(ctx, item.product_id, item.quantity, orderId);
+      await reserveStock(ctx, item.product_id, item.quantity, orderId);
     }
 
     // Cart is single-use per checkout.
-    ctx.db.prepare('DELETE FROM cart_items WHERE cart_id = ?').run(cart.id);
+    await ctx.db.prepare('DELETE FROM cart_items WHERE cart_id = ?').run(cart.id);
 
-    audit(ctx, {
+    await audit(ctx, {
       actorId: input.customerId,
       actorRole: 'customer',
       action: 'order.created',
@@ -211,32 +212,50 @@ export function checkout(ctx: AppCtx, input: CheckoutInput): OrderRow {
     });
 
     if (state === 'Confirmed') {
-      notifyMerchantNewOrder(ctx, orderId, cart.store_id, input.customerId);
+      await notifyMerchantNewOrder(ctx, orderId, cart.store_id, input.customerId);
     }
 
-    return getOrderRow(ctx, orderId)!;
-  });
+    return (await getOrderRow(ctx, orderId))!;
+    });
+  } catch (err) {
+    // Concurrent double-submit (FR-ORD-03 / CART-011): under Postgres both
+    // requests run in parallel, so the pre-check above can miss an order that
+    // commits between it and our insert. The loser rolls back on the
+    // UNIQUE(idempotency_key) violation — return the winner instead of a 500.
+    // (SQLite serialises requests, so it only reaches the pre-check path.)
+    if (input.idempotencyKey && isUniqueViolation(err)) {
+      const existing = await findByIdempotencyKey(ctx, input.idempotencyKey);
+      if (existing && existing.customer_id === input.customerId) return existing;
+      if (existing) throw errors.conflict('IDEMPOTENCY_CONFLICT', 'Idempotency key already used.');
+    }
+    throw err;
+  }
 }
 
-function notifyMerchantNewOrder(ctx: AppCtx, orderId: string, storeId: string, customerId: string): void {
-  const order = getOrderRow(ctx, orderId);
-  const store = ctx.db.prepare('SELECT name, merchant_id FROM stores WHERE id = ?').get(storeId) as
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null | undefined;
+  return e?.code === '23505' || /UNIQUE constraint failed/i.test(String(e?.message));
+}
+
+async function notifyMerchantNewOrder(ctx: AppCtx, orderId: string, storeId: string, customerId: string): Promise<void> {
+  const order = await getOrderRow(ctx, orderId);
+  const store = await ctx.db.prepare('SELECT name, merchant_id FROM stores WHERE id = ?').get(storeId) as
     | { name: string; merchant_id: string }
     | undefined;
   const merchant = store
-    ? (ctx.db.prepare('SELECT owner_user_id FROM merchants WHERE id = ?').get(store.merchant_id) as
+    ? (await ctx.db.prepare('SELECT owner_user_id FROM merchants WHERE id = ?').get(store.merchant_id) as
         | { owner_user_id: string }
         | undefined)
     : undefined;
   if (!order || !store || !merchant) return;
   // NOT-001: merchant notified of a new confirmed order.
-  notify(ctx, {
+  await notify(ctx, {
     type: 'order.new',
     recipient: merchant.owner_user_id,
     subject: `New order ${order.order_number}`,
     body: `New order ${order.order_number} received for ${store.name}.`
   });
-  notify(ctx, {
+  await notify(ctx, {
     type: 'order.confirmed',
     recipient: customerId,
     subject: `Order ${order.order_number} confirmed`,

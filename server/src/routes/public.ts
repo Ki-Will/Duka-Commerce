@@ -2,12 +2,14 @@ import { Router, type Request, type Response } from 'express';
 import type { AppCtx } from '../context.js';
 import type { SqlParam } from '../db/index.js';
 import { errors } from '../domain/errors.js';
+import { wrap } from '../middleware.js';
+
 
 /** Public marketplace discovery (UC-DC-03, FR-CAT-08..10). */
 export function publicRoutes(ctx: AppCtx): Router {
   const r = Router();
 
-  r.get('/stores', (req: Request, res: Response) => {
+  r.get('/stores', wrap(async (req: Request, res: Response) => {
     const search = String(req.query.search ?? '').trim();
     const params: SqlParam[] = [];
     let where = `s.status = 'open' AND m.status = 'approved'`;
@@ -15,7 +17,7 @@ export function publicRoutes(ctx: AppCtx): Router {
       where += ' AND (s.name LIKE ? OR s.description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
-    const rows = ctx.db
+    const rows = await ctx.db
       .prepare(
         `SELECT s.id, s.name, s.slug, s.description, s.logo_url, s.contact, s.status,
                 (SELECT COUNT(*) FROM products p WHERE p.store_id = s.id AND p.status = 'published') AS product_count
@@ -24,10 +26,10 @@ export function publicRoutes(ctx: AppCtx): Router {
       )
       .all(...params);
     res.json({ stores: rows });
-  });
+  }));
 
-  r.get('/stores/:storeId', (req: Request, res: Response) => {
-    const store = ctx.db
+  r.get('/stores/:storeId', wrap(async (req: Request, res: Response) => {
+    const store = await ctx.db
       .prepare(
         `SELECT s.id, s.name, s.slug, s.description, s.logo_url, s.banner_url, s.contact, s.status, m.status AS merchant_status
          FROM stores s JOIN merchants m ON m.id = s.merchant_id
@@ -35,28 +37,28 @@ export function publicRoutes(ctx: AppCtx): Router {
       )
       .get(req.params.storeId, req.params.storeId) as Record<string, unknown> | undefined;
     if (!store) throw errors.notFound('Store not found.');
-    const isOwnerView = req.user && storeStatusAllowsPrivate(ctx, req.user.id, store.id as string);
+    const isOwnerView = req.user && await storeStatusAllowsPrivate(ctx, req.user.id, store.id as string);
     if ((store.status !== 'open' || store.merchant_status !== 'approved') && !isOwnerView) {
       throw errors.notFound('Store not found.');
     }
     res.json({ store });
-  });
+  }));
 
-  r.get('/stores/:storeId/products', (req: Request, res: Response) => {
-    const store = ctx.db.prepare('SELECT id FROM stores WHERE id = ? OR slug = ?').get(req.params.storeId, req.params.storeId) as
+  r.get('/stores/:storeId/products', wrap(async (req: Request, res: Response) => {
+    const store = await ctx.db.prepare('SELECT id FROM stores WHERE id = ? OR slug = ?').get(req.params.storeId, req.params.storeId) as
       | { id: string }
       | undefined;
     if (!store) throw errors.notFound('Store not found.');
-    const [rows] = [queryProducts(ctx, req, { storeId: store.id, publicOnly: true })];
+    const [rows] = [await queryProducts(ctx, req, { storeId: store.id, publicOnly: true })];
     res.json({ products: rows });
-  });
+  }));
 
-  r.get('/products', (req: Request, res: Response) => {
-    res.json({ products: queryProducts(ctx, req, { publicOnly: true }) });
-  });
+  r.get('/products', wrap(async (req: Request, res: Response) => {
+    res.json({ products: await queryProducts(ctx, req, { publicOnly: true }) });
+  }));
 
-  r.get('/products/:productId', (req: Request, res: Response) => {
-    const product = ctx.db
+  r.get('/products/:productId', wrap(async (req: Request, res: Response) => {
+    const product = await ctx.db
       .prepare(
         `SELECT p.*, s.name AS store_name, s.slug AS store_slug, s.status AS store_status,
                 c.name AS category_name, i.quantity
@@ -71,22 +73,22 @@ export function publicRoutes(ctx: AppCtx): Router {
     const canViewPrivate =
       product.status !== 'published' &&
       req.user &&
-      storeStatusAllowsPrivate(ctx, req.user.id, product.store_id as string);
+      await storeStatusAllowsPrivate(ctx, req.user.id, product.store_id as string);
     if (product.status !== 'published' && !canViewPrivate) throw errors.notFound('Product not found.');
     // Availability shown to customers reflects real stock (no orderable claim when out of stock).
     res.json({ product: { ...product, orderable: product.status === 'published' && product.store_status === 'open' } });
-  });
+  }));
 
-  r.get('/categories', (_req: Request, res: Response) => {
-    const categories = ctx.db.prepare('SELECT * FROM categories ORDER BY name').all();
+  r.get('/categories', wrap(async (_req: Request, res: Response) => {
+    const categories = await ctx.db.prepare('SELECT * FROM categories ORDER BY name').all();
     res.json({ categories });
-  });
+  }));
 
   return r;
 }
 
-function storeStatusAllowsPrivate(ctx: AppCtx, userId: string, storeId: string): boolean {
-  const row = ctx.db
+async function storeStatusAllowsPrivate(ctx: AppCtx, userId: string, storeId: string): Promise<boolean> {
+  const row = await ctx.db
     .prepare(
       `SELECT 1 FROM stores s JOIN merchants m ON m.id = s.merchant_id
        WHERE s.id = ? AND m.owner_user_id = ?
@@ -96,11 +98,11 @@ function storeStatusAllowsPrivate(ctx: AppCtx, userId: string, storeId: string):
   return Boolean(row);
 }
 
-function queryProducts(
+async function queryProducts(
   ctx: AppCtx,
   req: Request,
   opts: { storeId?: string; publicOnly?: boolean }
-): unknown[] {
+): Promise<unknown[]> {
   const clauses: string[] = [];
   const params: SqlParam[] = [];
   if (opts.publicOnly) clauses.push(`p.status = 'published'`, `s.status = 'open'`, `m.status = 'approved'`);
@@ -134,5 +136,5 @@ function queryProducts(
     ${clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''}
     ORDER BY ${orderBy}
     LIMIT 200`;
-  return ctx.db.prepare(sql).all(...params);
+  return await ctx.db.prepare(sql).all(...params);
 }

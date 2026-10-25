@@ -1,4 +1,4 @@
-import { openDb, type Db } from './db/index.js';
+import { openDb, openPostgres, type Db, type DbDriver } from './db/index.js';
 
 export interface Config {
   env: 'test' | 'development' | 'production';
@@ -29,11 +29,36 @@ export interface AppCtx {
   config: Config;
   logs: LogRecord[];
   log(rec: Omit<LogRecord, 'timestamp' | 'service' | 'environment'>): void;
-  close(): void;
+  close(): void | Promise<void>;
+}
+
+/**
+ * Pick the backend: explicit call-site option wins, then `DUKA_DB_DRIVER`,
+ * then auto — Neon Postgres when `DATABASE_URL` is present (dev/production),
+ * SQLite otherwise (hermetic tests, offline fallback).
+ */
+function openDatabase(options: { file?: string; driver?: DbDriver }): Db {
+  if (options.driver === 'postgres') return openNeon();
+  if (options.driver === 'sqlite') return openDb(options.file ?? process.env.DUKA_DB_FILE ?? 'duka.sqlite');
+  if (options.file) return openDb(options.file);
+  if (process.env.DUKA_DB_DRIVER === 'postgres') return openNeon();
+  if (process.env.DUKA_DB_DRIVER === 'sqlite') return openDb(process.env.DUKA_DB_FILE ?? 'duka.sqlite');
+  if (process.env.DATABASE_URL && !process.env.DUKA_DB_FILE) return openNeon();
+  return openDb(process.env.DUKA_DB_FILE ?? 'duka.sqlite');
+}
+
+function openNeon(): Db {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('Postgres driver requested but DATABASE_URL is not set.');
+  // Schema DDL goes over the direct (unpooled) endpoint when available.
+  return openPostgres({ url, migrateUrl: process.env.DATABASE_URL_UNPOOLED });
 }
 
 export function createContext(options: {
   file?: string;
+  driver?: DbDriver;
+  /** Reuse an already-open database (tests share one pool per worker). */
+  db?: Db;
   env?: Config['env'];
   logs?: LogRecord[];
 } = {}): AppCtx {
@@ -50,7 +75,7 @@ export function createContext(options: {
     webhookSecret: process.env.PAYMENT_WEBHOOK_SECRET ?? 'duka-sandbox-webhook-secret',
     serviceName: 'duka-api'
   };
-  const db = openDb(options.file ?? process.env.DUKA_DB_FILE ?? 'duka.sqlite');
+  const db = options.db ?? openDatabase(options);
   return {
     db,
     config,
@@ -69,7 +94,7 @@ export function createContext(options: {
       }
     },
     close() {
-      db.close();
+      return db.close();
     }
   };
 }

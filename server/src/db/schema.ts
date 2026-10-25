@@ -1,11 +1,13 @@
 /**
  * DukaCommerce Phase 1 schema (SRS KVT-DC-SRS-2026-001 §10 Data Requirements).
- * SQLite dialect via node:sqlite (PostgreSQL-equivalent semantics for this
- * school-project baseline: FKs, unique constraints, atomic conditional UPDATEs).
+ * Dialect-neutral DDL: runs unchanged on both backends —
+ *   - PostgreSQL (Neon) in dev/production: `server/src/db/index.ts` applies it
+ *     over a direct (unpooled) connection on first use,
+ *   - SQLite via node:sqlite for hermetic unit tests / offline fallback.
+ * FKs, unique constraints and atomic conditional UPDATEs behave the same on
+ * both; SQLite enforces FKs with a PRAGMA set in `openDb` (see below).
  */
 export const SCHEMA = `
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   role          TEXT NOT NULL CHECK (role IN ('customer','staff','manager','owner','support','admin')),

@@ -13,13 +13,13 @@ export interface StoreAccess {
 }
 
 /** Extract the caller's store access for a given store; null when not related. */
-export function storeAccessFor(ctx: AppCtx, user: SessionUser, storeId: string): StoreAccess | null {
-  const store = ctx.db
+export async function storeAccessFor(ctx: AppCtx, user: SessionUser, storeId: string): Promise<StoreAccess | null> {
+  const store = await ctx.db
     .prepare('SELECT id, merchant_id FROM stores WHERE id = ?')
     .get(storeId) as { id: string; merchant_id: string } | undefined;
   if (!store) return null;
 
-  const merchant = ctx.db
+  const merchant = await ctx.db
     .prepare('SELECT id, owner_user_id FROM merchants WHERE id = ?')
     .get(store.merchant_id) as { id: string; owner_user_id: string } | undefined;
   if (!merchant) return null;
@@ -32,7 +32,7 @@ export function storeAccessFor(ctx: AppCtx, user: SessionUser, storeId: string):
     return { storeId: store.id, merchantId: merchant.id, role: 'owner', perms: ALL_STORE_PERMS, userRole: user.role };
   }
 
-  const staff = ctx.db
+  const staff = await ctx.db
     .prepare('SELECT role, perms FROM store_staff WHERE store_id = ? AND user_id = ?')
     .get(storeId, user.id) as { role: 'staff' | 'manager'; perms: string } | undefined;
   if (!staff) return null;
@@ -55,8 +55,8 @@ export function storeAccessFor(ctx: AppCtx, user: SessionUser, storeId: string):
  * FR-AUTH-09 / SEC-05: tenant ownership from authenticated context only.
  * Throws 403/404 without revealing other tenants' data.
  */
-export function requireStoreAccess(ctx: AppCtx, user: SessionUser, storeId: string): StoreAccess {
-  const access = storeAccessFor(ctx, user, storeId);
+export async function requireStoreAccess(ctx: AppCtx, user: SessionUser, storeId: string): Promise<StoreAccess> {
+  const access = await storeAccessFor(ctx, user, storeId);
   if (!access) throw errors.forbidden('You do not have access to this store.');
   return access;
 }

@@ -13,8 +13,8 @@ export interface AuditInput {
 }
 
 /** FR-AUD-01/02, SEC-12: immutable audit records for sensitive/commercial actions. */
-export function audit(ctx: AppCtx, input: AuditInput): void {
-  ctx.db
+export async function audit(ctx: AppCtx, input: AuditInput): Promise<void> {
+  await ctx.db
     .prepare(
       `INSERT INTO audit_events (id, actor_id, actor_role, action, entity, entity_id, detail, trace_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -32,7 +32,7 @@ export function audit(ctx: AppCtx, input: AuditInput): void {
     );
 }
 
-export function listAudit(
+export async function listAudit(
   ctx: AppCtx,
   filter: { entity?: string; entityId?: string; limit?: number } = {}
 ) {
@@ -50,5 +50,5 @@ export function listAudit(
   const sql = `SELECT * FROM audit_events ${clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''}
                ORDER BY created_at DESC LIMIT ?`;
   params.push(limit);
-  return ctx.db.prepare(sql).all(...params);
+  return await ctx.db.prepare(sql).all(...params);
 }

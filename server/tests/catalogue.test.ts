@@ -81,7 +81,7 @@ describe('CAT — Catalogue & discovery', () => {
     expect(edit.status).toBe(200);
     expect(edit.body.product.description).toBe('Strong Portland cement');
     expect(edit.body.product.price).toBe(16000);
-    const row = sys.ctx.db.prepare('SELECT price FROM products WHERE id = ?').get(created.body.product.id) as { price: number };
+    const row = await sys.ctx.db.prepare('SELECT price FROM products WHERE id = ?').get(created.body.product.id) as { price: number };
     expect(row.price).toBe(16000);
   });
 
@@ -107,7 +107,7 @@ describe('CAT — Catalogue & discovery', () => {
   });
 
   it('CAT-009: customer browses an open store', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50 });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50 });
     const store = await request(sys.app).get(`/api/v1/stores/${m.storeId}`);
     expect(store.status).toBe(200);
     expect(store.body.store.name).toBe('Kigali Home');
@@ -116,9 +116,9 @@ describe('CAT — Catalogue & discovery', () => {
   });
 
   it('CAT-010: customer browses a category', async () => {
-    const catId = makeCategory(sys, 'Building Materials');
-    addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50, categoryId: catId });
-    addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Loose Tool', price: 5000, stock: 5 });
+    const catId = await makeCategory(sys, 'Building Materials');
+    await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50, categoryId: catId });
+    await addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Loose Tool', price: 5000, stock: 5 });
     const bySlug = await request(sys.app).get('/api/v1/products').query({ category: 'building-materials' });
     expect(bySlug.status).toBe(200);
     expect(bySlug.body.products).toHaveLength(1);
@@ -126,8 +126,8 @@ describe('CAT — Catalogue & discovery', () => {
   });
 
   it('CAT-011: customer searches products by SKU and name', async () => {
-    addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50 });
-    addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Hammer', price: 8500, stock: 40 });
+    await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50 });
+    await addProduct(sys, { storeId: m.storeId, sku: 'KHS-002', name: 'Hammer', price: 8500, stock: 40 });
     const byName = await request(sys.app).get('/api/v1/products').query({ search: 'Cement' });
     expect(byName.body.products).toHaveLength(1);
     expect(byName.body.products[0].sku).toBe('KHS-001');
@@ -137,9 +137,9 @@ describe('CAT — Catalogue & discovery', () => {
   });
 
   it('CAT-012: customer filters products with matching results', async () => {
-    const catId = makeCategory(sys, 'Electronics');
-    addProduct(sys, { storeId: m.storeId, sku: 'TC-001', name: 'USB-C Cable', price: 7500, stock: 60, categoryId: catId });
-    addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
+    const catId = await makeCategory(sys, 'Electronics');
+    await addProduct(sys, { storeId: m.storeId, sku: 'TC-001', name: 'USB-C Cable', price: 7500, stock: 60, categoryId: catId });
+    await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement', price: 15000, stock: 10 });
     const filtered = await request(sys.app).get('/api/v1/products').query({ category: catId });
     expect(filtered.body.products).toHaveLength(1);
     expect(filtered.body.products[0].name).toBe('USB-C Cable');
@@ -148,8 +148,8 @@ describe('CAT — Catalogue & discovery', () => {
   });
 
   it('CAT-013: suspended product is hidden from browse/search and not orderable', async () => {
-    const p = addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50 });
-    makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
+    const p = await addProduct(sys, { storeId: m.storeId, sku: 'KHS-001', name: 'Cement 50kg', price: 15000, stock: 50 });
+    await makeUser(sys, { role: 'admin', name: 'Admin', email: 'admin@test.com' });
     const { cookie: admin } = await login(sys, 'admin@test.com', 'password123');
     const susp = await request(sys.app)
       .post(`/api/v1/admin/products/${p}/status`)
@@ -165,13 +165,13 @@ describe('CAT — Catalogue & discovery', () => {
 
   it('CAT-014: Merchant A cannot edit Store B product (ownership isolation)', async () => {
     const other = await makeMerchant(sys, { ownerEmail: 'other@test.com', storeName: 'Tech Corner' });
-    const productB = addProduct(sys, { storeId: other.storeId, sku: 'TC-001', name: 'USB-C Cable', price: 7500, stock: 60 });
+    const productB = await addProduct(sys, { storeId: other.storeId, sku: 'TC-001', name: 'USB-C Cable', price: 7500, stock: 60 });
     const edit = await request(sys.app)
       .patch(`/api/v1/merchant/products/${productB}`)
       .set('Cookie', m.ownerCookie)
       .send({ price: 1 });
     expect(edit.status).toBe(404);
-    const row = sys.ctx.db.prepare('SELECT price FROM products WHERE id = ?').get(productB) as { price: number };
+    const row = await sys.ctx.db.prepare('SELECT price FROM products WHERE id = ?').get(productB) as { price: number };
     expect(row.price).toBe(7500);
     // Publish attempt also denied
     const pub = await request(sys.app)
