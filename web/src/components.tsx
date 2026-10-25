@@ -11,7 +11,7 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="app">
       <header className="topbar">
-        <Link to="/" className="brand">🇰🇪 <b>Duka</b>Commerce</Link>
+        <Link to="/" className="brand" aria-label="DukaCommerce home"><img className="brand-mark" src="/dukacommerce-mark.svg" alt="" /><span><b>Duka</b>Commerce</span></Link>
         <nav className="mainnav">
           <NavLink to="/">Stores</NavLink>
           {user && <NavLink to="/carts">Cart</NavLink>}
