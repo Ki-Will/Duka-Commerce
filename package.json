@@ -11,10 +11,10 @@
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev -w server",
-    "dev:web": "npm run dev -w web",
-    "build": "npm run build -w web",
-    "build:functions": "esbuild server/src/serverless.ts --bundle --platform=node --target=node22 --format=cjs --outfile=api/index.js --external:node:* --external:express --log-level=warning",
+    "dev": "node init && npm run dev -w server",
+    "dev:web": "node init && npm run dev -w web",
+    "build": "node init && npm run build -w web",
+    "build:functions": "node init && esbuild server/src/serverless.ts --bundle --platform=node --target=node22 --format=cjs --outfile=api/index.js --external:node:* --external:express --log-level=warning",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test": "npm run test -w server",
     "seed": "npm run seed -w server"
@@ -25,6 +25,8 @@
   },
   "dependencies": {
     "@neon/config": "^1.9.4",
-    "@neon/env": "^1.6.5"
+    "@neon/env": "^1.6.5",
+    "dotenv": "^8.2.0",
+    "node-fetch": "^3.3.2"
   }
 }

@@ -7,8 +7,6 @@ node_modules/
 # ==========================================
 # Environment variables and secrets
 # ==========================================
-.env
-.env.*
 !.env.example
 !.env.test.example
 
@@ -118,7 +116,6 @@ Desktop.ini
 *.orig
 *.rej
 .vercel
-.env*
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
@@ -127,3 +124,4 @@ temp_interactive_push.bat
 
 # Neon local link state
 .neon
+config.bat
